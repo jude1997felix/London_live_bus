@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "london-live",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8123", "--directory", "/Users/judefelix/Personal/London_live_bus"],
+      "port": 8123
+    }
+  ]
+}

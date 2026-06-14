@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>London Live — Bus Tracker</title>
+  <link rel="preconnect" href="https://api.tfl.gov.uk" />
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <header>
+        <h1>London Live <span class="badge">BUS</span></h1>
+        <p class="tagline">Real-time bus routes &amp; arrivals</p>
+      </header>
+
+      <form id="search-form" autocomplete="off">
+        <label for="route-input">Bus route</label>
+        <div class="search-row">
+          <input
+            id="route-input"
+            type="text"
+            inputmode="numeric"
+            placeholder="e.g. 38, 73, N29"
+            aria-label="Bus route number"
+          />
+          <button type="submit" id="search-btn">Go</button>
+        </div>
+        <div id="status" class="status" role="status" aria-live="polite"></div>
+      </form>
+
+      <div id="route-meta" class="hidden">
+        <div class="direction-toggle">
+          <button data-dir="outbound" class="dir-btn active">Outbound</button>
+          <button data-dir="inbound" class="dir-btn">Inbound</button>
+        </div>
+        <h2 id="route-title"></h2>
+        <ul id="stop-list" aria-label="Stops on route"></ul>
+      </div>
+    </aside>
+
+    <main id="map" aria-label="Map of bus route"></main>
+  </div>
+
+  <div id="arrivals-panel" class="hidden" role="dialog" aria-label="Live arrivals">
+    <div class="ap-head">
+      <h3 id="ap-stop-name"></h3>
+      <button id="ap-close" aria-label="Close">&times;</button>
+    </div>
+    <div id="ap-body"></div>
+    <div class="ap-foot">
+      <span id="ap-refresh-note"></span>
+    </div>
+  </div>
+
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
