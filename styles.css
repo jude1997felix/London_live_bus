@@ -25,6 +25,7 @@ html, body {
   display: grid;
   grid-template-columns: 340px 1fr;
   height: 100vh;
+  height: 100dvh; /* respect mobile browser chrome (address bar) */
 }
 
 /* ---------- Sidebar ---------- */
@@ -83,6 +84,7 @@ label {
 
 #route-input {
   flex: 1;
+  min-width: 0; /* allow the input to shrink so the Go button always fits */
   background: var(--panel-2);
   border: 1px solid var(--line);
   color: var(--text);
@@ -141,6 +143,7 @@ label {
 }
 .status.error { color: var(--accent); }
 .status.loading { color: var(--accent-2); }
+.status:empty { display: none; } /* reclaim space when there's no message */
 
 #route-meta { padding: 14px 18px; overflow-y: auto; }
 
@@ -324,9 +327,46 @@ label {
 
 .hidden { display: none !important; }
 
-/* ---------- Mobile ---------- */
-@media (max-width: 760px) {
-  #app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
-  #sidebar { max-height: 45vh; }
-  #arrivals-panel { left: 16px; right: 16px; width: auto; }
+/* ---------- Mobile portrait ---------- */
+@media (max-width: 760px) and (orientation: portrait) {
+  /* Stack sidebar over map, and give the map the lion's share of the screen. */
+  #app { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+
+  #sidebar {
+    max-height: 42vh;
+    /* header + search stay put; the route/nearby lists scroll inside. */
+  }
+  #sidebar header { padding: 12px 16px 8px; flex: 0 0 auto; }
+  h1 { font-size: 18px; }
+  .tagline { display: none; } /* save vertical space */
+
+  #search-form { padding: 12px 16px; flex: 0 0 auto; }
+  label { margin-bottom: 4px; }
+
+  /* These scrollable sections share the remaining sidebar height. */
+  #route-meta, #nearby-meta { flex: 1 1 auto; min-height: 0; padding: 10px 16px; }
+  #route-title { margin-bottom: 8px; }
+  .direction-toggle { margin-bottom: 10px; }
+
+  /* Floating panels become bottom sheets: full width, capped height. */
+  #arrivals-panel, #bus-panel {
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    width: auto;
+    max-height: 50vh;
+  }
+}
+
+/* ---------- Phone landscape (wide but short) ---------- */
+/* Keep the two columns — stacking would crush a short screen — but slim the
+   sidebar so the map fills the rest. */
+@media (max-width: 900px) and (orientation: landscape) {
+  #app { grid-template-columns: 240px 1fr; }
+  #sidebar header { padding: 10px 14px 6px; }
+  h1 { font-size: 17px; }
+  .tagline { display: none; }
+  #search-form { padding: 12px 14px; }
+  #route-meta, #nearby-meta { padding: 10px 14px; }
+  #arrivals-panel, #bus-panel { max-height: 88vh; width: 260px; }
 }
