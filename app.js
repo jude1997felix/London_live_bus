@@ -35,6 +35,11 @@
     nearbyMeta: document.getElementById("nearby-meta"),
     nearbyList: document.getElementById("nearby-list"),
     nearbyTitle: document.getElementById("nearby-title"),
+    busPanel: document.getElementById("bus-panel"),
+    bpTitle: document.getElementById("bp-title"),
+    bpBody: document.getElementById("bp-body"),
+    bpClose: document.getElementById("bp-close"),
+    bpNote: document.getElementById("bp-note"),
   };
 
   // ---- State ----
@@ -54,7 +59,9 @@
   const DEFAULT_SEGMENT_SECS = 90; // fallback inter-stop travel time
   let vehiclePollTimer = null;
   let busTickTimer = null;
-  let vehicles = new Map(); // vehicleId -> { marker, prev, next, tts, segSecs, bearing, dest }
+  let vehicles = new Map(); // vehicleId -> { marker, prev, next, tts, segSecs, dest, upcoming }
+  let selectedVehicleId = null; // vehicle whose upcoming-stops panel is open
+  let busPanelTimer = null;
 
   // Greater London bounding box — the default map view frames roughly this.
   const LONDON_BOUNDS = L.latLngBounds([51.28, -0.52], [51.70, 0.33]);
@@ -237,6 +244,7 @@
   // allLines=true (near-me stops) shows every route calling at the stop;
   // otherwise it's filtered to the selected route.
   async function selectStop(stop, allLines) {
+    closeBusPanel(); // don't show stop + bus panels at once
     activeStop = stop;
     activeStopAllLines = !!allLines;
     highlightStopInList(stop.id);
@@ -386,6 +394,7 @@
           zIndexOffset: 1000,
         }).bindTooltip("", { direction: "top", offset: [0, -10] });
         marker.addTo(busLayer);
+        marker.on("click", () => openBusPanel(vehId));
         v = { marker };
         vehicles.set(vehId, v);
       }
@@ -394,8 +403,14 @@
       v.tts = nextP.timeToStation;
       v.segSecs = segSecs;
       v.dest = nextP.destinationName || nextP.towards || "";
+      // Full ordered list of upcoming stops, with an absolute arrival time so
+      // the panel can show an accurate live countdown without drift.
+      v.upcoming = list.map((p) => ({
+        name: (route.stops[idx.get(p.naptanId)] || {}).name || p.stationName,
+        expected: Date.parse(p.expectedArrival),
+      }));
       v.marker.setTooltipContent(
-        `Route ${current.lineId.toUpperCase()} → ${escapeHtml(v.dest)}<br>Next stop: ${escapeHtml(next.name)}`
+        `Route ${current.lineId.toUpperCase()} → ${escapeHtml(v.dest)}<br>Next stop: ${escapeHtml(next.name)}<br><em>Click for upcoming stops</em>`
       );
       positionBus(v);
     });
@@ -407,6 +422,53 @@
         vehicles.delete(id);
       }
     });
+
+    // Keep an open bus panel in sync with the freshly fetched predictions.
+    if (selectedVehicleId) renderBusPanel();
+  }
+
+  // ---------- Bus upcoming-stops panel ----------
+  function openBusPanel(vehId) {
+    selectedVehicleId = vehId;
+    closePanel(); // close the stop-arrivals panel to avoid clutter
+    els.busPanel.classList.remove("hidden");
+    renderBusPanel();
+    if (busPanelTimer) clearInterval(busPanelTimer);
+    busPanelTimer = setInterval(renderBusPanel, 1000); // live countdown
+  }
+
+  function renderBusPanel() {
+    const v = selectedVehicleId && vehicles.get(selectedVehicleId);
+    if (!v) {
+      els.bpTitle.textContent = "🚌 Bus";
+      els.bpBody.innerHTML = '<div class="ap-empty">This bus has left the line.</div>';
+      els.bpNote.textContent = "";
+      return;
+    }
+    els.bpTitle.innerHTML = `🚌 Route ${escapeHtml(current.lineId.toUpperCase())} → ${escapeHtml(v.dest)}`;
+    const now = Date.now();
+    els.bpBody.innerHTML = (v.upcoming || [])
+      .map((s, i) => {
+        const mins = Math.round((s.expected - now) / 60000);
+        const due = mins <= 0;
+        return `
+          <div class="bp-stop${i === 0 ? " next" : ""}">
+            <span class="bp-name">${escapeHtml(s.name)}</span>
+            <span class="bp-time${due ? " due" : ""}">${due ? "Due" : mins + " min"}</span>
+          </div>`;
+      })
+      .join("");
+    els.bpNote.textContent =
+      (v.upcoming ? v.upcoming.length : 0) + " stops ahead · live · " + new Date().toLocaleTimeString();
+  }
+
+  function closeBusPanel() {
+    els.busPanel.classList.add("hidden");
+    selectedVehicleId = null;
+    if (busPanelTimer) {
+      clearInterval(busPanelTimer);
+      busPanelTimer = null;
+    }
   }
 
   function tickVehicles() {
@@ -433,6 +495,7 @@
     vehiclePollTimer = busTickTimer = null;
     vehicles.clear();
     if (busLayer) busLayer.clearLayers();
+    closeBusPanel();
   }
 
   // ---------- Stops near me (geolocation) ----------
@@ -662,6 +725,7 @@
     });
   });
   els.apClose.addEventListener("click", closePanel);
+  els.bpClose.addEventListener("click", closeBusPanel);
   els.nearmeBtn.addEventListener("click", findNearMe);
 
   initMap();

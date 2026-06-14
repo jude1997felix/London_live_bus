@@ -244,10 +244,9 @@ label {
   border-radius: 50%;
 }
 
-/* ---------- Arrivals panel ---------- */
-#arrivals-panel {
+/* ---------- Floating panels (arrivals + bus) ---------- */
+#arrivals-panel, #bus-panel {
   position: fixed;
-  right: 16px;
   bottom: 16px;
   width: 320px;
   max-height: 60vh;
@@ -260,6 +259,25 @@ label {
   overflow: hidden;
   z-index: 1000;
 }
+#arrivals-panel { right: 16px; }
+#bus-panel { left: 16px; }
+
+/* Upcoming-stops list inside the bus panel. */
+.bp-stop {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+.bp-stop:last-child { border-bottom: none; }
+.bp-stop.next { background: var(--panel-2); }
+.bp-stop .bp-name { flex: 1; color: var(--text); }
+.bp-stop.next .bp-name { font-weight: 600; }
+.bp-stop .bp-time { font-weight: 700; color: var(--good); white-space: nowrap; }
+.bp-stop .bp-time.due { color: var(--accent); }
+.bus-marker { cursor: pointer; }
 .ap-head {
   display: flex;
   align-items: center;
