@@ -42,15 +42,19 @@
   };
   let arrivalsTimer = null;
   let activeStop = null; // { id, name }
+  let lastRouteBounds = null; // extent of the currently drawn route
+
+  // Greater London bounding box — the default map view frames roughly this.
+  const LONDON_BOUNDS = L.latLngBounds([51.28, -0.52], [51.70, 0.33]);
 
   // ---------- Map ----------
   function initMap() {
-    map = L.map("map", { zoomControl: true, attributionControl: true }).setView(
-      [51.5074, -0.1278],
-      11
-    );
+    map = L.map("map", { zoomControl: true, attributionControl: true });
+    // Default: show Greater London until the user picks a route.
+    map.fitBounds(LONDON_BOUNDS);
+
     L.tileLayer(
-      "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+      "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
       {
         attribution:
           '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a> · Data: <a href="https://tfl.gov.uk">TfL</a>',
@@ -60,6 +64,17 @@
     ).addTo(map);
     routeLayer = L.layerGroup().addTo(map);
     markerLayer = L.layerGroup().addTo(map);
+    // Whenever the map container changes size (mobile layout shifts, the
+    // sidebar growing, scroll settling), recompute Leaflet's size so tiles
+    // fill the whole viewport instead of leaving blank gaps.
+    if (window.ResizeObserver) {
+      let raf;
+      const ro = new ResizeObserver(() => {
+        cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(() => map.invalidateSize());
+      });
+      ro.observe(document.getElementById("map"));
+    }
   }
 
   // ---------- Fetch helpers ----------
@@ -78,9 +93,23 @@
     return res.json();
   }
 
+  // Recursively pull [lon,lat] pairs out of TfL's variably-nested lineString
+  // arrays and push them as [lat,lon] (Leaflet order).
+  function extractCoords(node, out) {
+    if (!Array.isArray(node)) return;
+    if (node.length === 2 && typeof node[0] === "number" && typeof node[1] === "number") {
+      out.push([node[1], node[0]]);
+    } else {
+      node.forEach((child) => extractCoords(child, out));
+    }
+  }
+
   // ---------- Cache ----------
+  // Bump the version suffix whenever the parse/shape of cached data changes,
+  // so old (bad) entries are ignored instead of reused.
+  const CACHE_VERSION = "v2";
   function cacheKey(lineId, dir) {
-    return `route:${lineId}:${dir}`;
+    return `route:${CACHE_VERSION}:${lineId}:${dir}`;
   }
   function readCache(lineId, dir) {
     try {
@@ -118,9 +147,13 @@
       lon: s.lon,
     }));
 
+    // TfL encodes each lineString as a JSON string, but the nesting depth
+    // varies (sometimes [[lon,lat],...], sometimes [[[lon,lat],...]]). Walk it
+    // recursively, pull out every [lon,lat] pair, and flip to [lat,lon].
     const lineStrings = (raw.lineStrings || []).map((s) => {
-      const coords = JSON.parse(s); // [[lon,lat], ...]
-      return coords.map((c) => [c[1], c[0]]); // -> [lat,lon] for Leaflet
+      const out = [];
+      extractCoords(JSON.parse(s), out);
+      return out;
     });
 
     const result = { name: raw.lineName || lineId, stops, lineStrings };
@@ -159,7 +192,10 @@
     });
 
     if (allLatLngs.length) {
-      map.fitBounds(L.latLngBounds(allLatLngs).pad(0.08));
+      // Remember the route's extent so we can (re-)fit it after any layout
+      // change, then zoom to frame the whole route now.
+      lastRouteBounds = L.latLngBounds(allLatLngs);
+      map.fitBounds(lastRouteBounds, { padding: [30, 30] });
     }
   }
 
@@ -300,6 +336,14 @@
     drawRoute(route);
     // New route — close any open arrivals panel from a previous route.
     closePanel();
+    // Bring the map into view (matters on mobile, where it sits below the
+    // sidebar). Once the scroll/layout settles, recompute the map size and
+    // re-fit the route so the zoom is correct for the final container size.
+    document.getElementById("map").scrollIntoView({ behavior: "smooth", block: "nearest" });
+    setTimeout(() => {
+      map.invalidateSize();
+      if (lastRouteBounds) map.fitBounds(lastRouteBounds, { padding: [30, 30] });
+    }, 350);
   }
 
   async function switchDirection(dir) {

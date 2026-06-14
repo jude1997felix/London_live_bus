@@ -179,8 +179,8 @@ label {
 #stop-list li.active { background: var(--panel-2); color: #fff; }
 
 /* ---------- Map ---------- */
-#map { height: 100%; background: #0b0d10; }
-.leaflet-container { background: #0b0d10; }
+#map { height: 100%; background: #e7e5df; }
+.leaflet-container { background: #e7e5df; }
 
 .stop-marker {
   background: var(--accent);
