@@ -65,7 +65,10 @@
     integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
     crossorigin=""
   ></script>
-  <script src="config.js"></script>
+  <!-- Default config so the app runs even when config.js is absent
+       (it's git-ignored, so the public GitHub Pages build has no key). -->
+  <script>window.TFL_CONFIG = { appKey: "" };</script>
+  <script src="config.js" onerror="/* no local key — run keyless */"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -42,15 +42,18 @@ python3 -m http.server 8000
 ### (Optional) Add a TfL API key
 
 The site works without a key, but TfL rate-limits unauthenticated traffic. For
-heavier use, register a free key at <https://api-portal.tfl.gov.uk> and paste it
-into [`config.js`](config.js):
+heavier use, register a free key at <https://api-portal.tfl.gov.uk>, then:
 
-```js
-window.TFL_CONFIG = { appKey: "YOUR_KEY_HERE" };
+```bash
+cp config.example.js config.js   # config.js is git-ignored
+# edit config.js and paste your key:
+#   window.TFL_CONFIG = { appKey: "YOUR_KEY_HERE" };
 ```
 
-Because this is a public static site, prefer a **domain-locked** key (set the
-allowed origin in the TfL portal) so it's safe to commit.
+`config.js` is **git-ignored**, so your key never reaches the public repo. The
+deployed GitHub Pages site therefore runs **keyless** (still works, just lower
+rate limits). To use a key on a public deploy without exposing it, put a small
+proxy in front of the TfL API — not needed for personal/low-traffic use.
 
 ## Deploy (GitHub Pages)
 

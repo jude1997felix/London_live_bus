@@ -1,1 +1,4 @@
 .DS_Store
+
+# Local TfL API key — never commit. Copy config.example.js to config.js.
+config.js
