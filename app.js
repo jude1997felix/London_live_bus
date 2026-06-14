@@ -523,29 +523,59 @@
     );
   }
 
+  // Search radii (metres) tried in order — start modest to keep the response
+  // small, widen only if nothing is found nearby.
+  const NEARBY_RADII = [1500, 3000];
+
+  async function fetchStopsWithin(lat, lon, radius) {
+    const url =
+      `${API}/StopPoint?stopTypes=NaptanPublicBusCoachTram&modes=bus` +
+      `&radius=${radius}&useStopPointHierarchy=false&lat=${lat}&lon=${lon}`;
+    const data = await getJSON(url);
+    return (data.stopPoints || []).map((s) => ({
+      id: s.naptanId || s.id,
+      name: s.commonName,
+      lat: s.lat,
+      lon: s.lon,
+      stopLetter: s.stopLetter,
+      lines: (s.lines || []).map((l) => l.name),
+      dist: haversine(lat, lon, s.lat, s.lon),
+    }));
+  }
+
   async function onPosition(pos) {
     const lat = pos.coords.latitude;
     const lon = pos.coords.longitude;
     try {
-      const url =
-        `${API}/StopPoint?stopTypes=NaptanPublicBusCoachTram&modes=bus` +
-        `&radius=500&useStopPointHierarchy=false&lat=${lat}&lon=${lon}`;
-      const data = await getJSON(url);
-      let stops = (data.stopPoints || []).map((s) => ({
-        id: s.naptanId || s.id,
-        name: s.commonName,
-        lat: s.lat,
-        lon: s.lon,
-        stopLetter: s.stopLetter,
-        lines: (s.lines || []).map((l) => l.name),
-        dist: haversine(lat, lon, s.lat, s.lon),
-      }));
-      stops.sort((a, b) => a.dist - b.dist);
-      stops = stops.slice(0, 12);
+      let stops = [];
+      let usedRadius = NEARBY_RADII[0];
+      for (const radius of NEARBY_RADII) {
+        usedRadius = radius;
+        stops = await fetchStopsWithin(lat, lon, radius);
+        if (stops.length) break; // widen only when the closer search is empty
+      }
+
       if (!stops.length) {
-        setStatus("No bus stops found within 500 m of you.", "error");
+        // Nothing found even at the widest radius — clear any stale near-me
+        // view, then say why.
+        els.nearbyMeta.classList.add("hidden");
+        meLayer.clearLayers();
+        if (!LONDON_BOUNDS.contains([lat, lon])) {
+          setStatus(
+            "You appear to be outside London — this app only covers London (TfL) buses.",
+            "error"
+          );
+        } else {
+          setStatus(
+            `No bus stops found within ${(usedRadius / 1000).toFixed(1)} km of you.`,
+            "error"
+          );
+        }
         return;
       }
+
+      stops.sort((a, b) => a.dist - b.dist);
+      stops = stops.slice(0, 15);
       showNearby(lat, lon, stops);
       setStatus("", "");
     } catch (e) {
