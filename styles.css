@@ -106,6 +106,33 @@ label {
 #search-btn:hover { filter: brightness(1.08); }
 #search-btn:disabled { opacity: 0.5; cursor: default; }
 
+#nearme-btn {
+  margin-top: 10px;
+  width: 100%;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px;
+  font-size: 13px;
+  cursor: pointer;
+}
+#nearme-btn:hover { border-color: var(--accent-2); }
+#nearme-btn:disabled { opacity: 0.5; cursor: default; }
+
+#nearby-meta { padding: 14px 18px; overflow-y: auto; border-bottom: 1px solid var(--line); }
+#nearby-title { font-size: 15px; margin: 0 0 10px; }
+#nearby-list { list-style: none; margin: 0; padding: 0; }
+#nearby-list li {
+  padding: 9px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+#nearby-list li:hover { background: var(--panel-2); }
+.nb-name { font-size: 13px; color: var(--text); }
+.nb-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
 .status {
   margin-top: 10px;
   font-size: 13px;
@@ -192,6 +219,29 @@ label {
   width: 16px; height: 16px;
   background: #fff;
   border: 3px solid var(--accent);
+}
+
+/* Live bus icon — glides between stops (position is stepped every 250ms in
+   JS, so no CSS transition is needed and panning stays snappy). */
+.bus-icon {
+  font-size: 20px;
+  line-height: 1;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5));
+}
+
+/* "You are here" pin for geolocation. */
+.me-marker {
+  width: 16px; height: 16px;
+  background: var(--accent-2);
+  border: 3px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 6px rgba(37,99,235,0.25);
+}
+.nearby-marker {
+  width: 12px; height: 12px;
+  background: #fff;
+  border: 2px solid var(--accent-2);
+  border-radius: 50%;
 }
 
 /* ---------- Arrivals panel ---------- */

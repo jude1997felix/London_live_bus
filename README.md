@@ -9,10 +9,21 @@ TfL arrival predictions.
 ## Features
 
 - 🔎 **Search any London bus route** (e.g. `38`, `73`, `N29`)
-- 🗺️ **Route drawn on a dark map** with all stops marked (Leaflet + OpenStreetMap)
+- 🗺️ **Route drawn on the map** with all stops marked (Leaflet + OpenStreetMap)
+- 🚌 **Live moving buses** — every vehicle on the line is shown gliding between
+  stops, positioned from TfL's per-vehicle arrival countdowns
+- 📍 **Stops near me** — geolocate to list and map the nearest bus stops
 - 🔁 **Outbound / inbound** direction toggle
 - ⏱️ **Live arrivals** — click a stop for real-time "due in X min", refreshed every 30s
 - 🪶 **Built to stay light** (see below)
+
+### A note on the moving buses
+
+TfL's public API does **not** expose raw GPS for buses. Instead, for the selected
+line it returns each vehicle's predicted countdown to every upcoming stop. The app
+places each bus on the segment just before the stop it's approaching and advances
+it smoothly as the countdown ticks down (predictions refresh every 30s). It's a
+faithful approximation of real positions, not a GPS feed.
 
 ## Keeping it light (anti-overload)
 

@@ -31,10 +31,14 @@
     apBody: document.getElementById("ap-body"),
     apClose: document.getElementById("ap-close"),
     apRefreshNote: document.getElementById("ap-refresh-note"),
+    nearmeBtn: document.getElementById("nearme-btn"),
+    nearbyMeta: document.getElementById("nearby-meta"),
+    nearbyList: document.getElementById("nearby-list"),
+    nearbyTitle: document.getElementById("nearby-title"),
   };
 
   // ---- State ----
-  let map, routeLayer, markerLayer;
+  let map, routeLayer, markerLayer, busLayer, meLayer;
   let current = {
     lineId: null,
     direction: "outbound",
@@ -42,7 +46,15 @@
   };
   let arrivalsTimer = null;
   let activeStop = null; // { id, name }
+  let activeStopAllLines = false; // near-me stops show every line, not one route
   let lastRouteBounds = null; // extent of the currently drawn route
+
+  // Live-bus tracking state
+  const VEHICLE_POLL_INTERVAL = 30000; // refresh predictions every 30s
+  const DEFAULT_SEGMENT_SECS = 90; // fallback inter-stop travel time
+  let vehiclePollTimer = null;
+  let busTickTimer = null;
+  let vehicles = new Map(); // vehicleId -> { marker, prev, next, tts, segSecs, bearing, dest }
 
   // Greater London bounding box — the default map view frames roughly this.
   const LONDON_BOUNDS = L.latLngBounds([51.28, -0.52], [51.70, 0.33]);
@@ -64,6 +76,8 @@
     ).addTo(map);
     routeLayer = L.layerGroup().addTo(map);
     markerLayer = L.layerGroup().addTo(map);
+    busLayer = L.layerGroup().addTo(map);
+    meLayer = L.layerGroup().addTo(map);
     // Whenever the map container changes size (mobile layout shifts, the
     // sidebar growing, scroll settling), recompute Leaflet's size so tiles
     // fill the whole viewport instead of leaving blank gaps.
@@ -220,8 +234,11 @@
   }
 
   // ---------- Arrivals (live, polled) ----------
-  async function selectStop(stop) {
+  // allLines=true (near-me stops) shows every route calling at the stop;
+  // otherwise it's filtered to the selected route.
+  async function selectStop(stop, allLines) {
     activeStop = stop;
+    activeStopAllLines = !!allLines;
     highlightStopInList(stop.id);
     els.panel.classList.remove("hidden");
     els.apName.textContent = stop.name;
@@ -234,13 +251,15 @@
   async function refreshArrivals() {
     if (!activeStop) return;
     try {
-      const url = `${API}/StopPoint/${encodeURIComponent(activeStop.id)}/Arrivals?lineIds=${encodeURIComponent(current.lineId)}`;
+      const url = `${API}/StopPoint/${encodeURIComponent(activeStop.id)}/Arrivals`;
       let arrivals = await getJSON(url);
-      // TfL's lineIds filter is unreliable at hub stops — enforce it client-side
-      // so the panel only shows the route the user actually selected.
-      arrivals = arrivals.filter(
-        (a) => String(a.lineId).toLowerCase() === current.lineId
-      );
+      if (!activeStopAllLines) {
+        // TfL's lineIds filter is unreliable at hub stops — enforce it
+        // client-side so the panel only shows the selected route.
+        arrivals = arrivals.filter(
+          (a) => String(a.lineId).toLowerCase() === current.lineId
+        );
+      }
       arrivals.sort((a, b) => a.timeToStation - b.timeToStation);
       arrivals = arrivals.slice(0, 8);
       renderArrivals(arrivals);
@@ -281,15 +300,257 @@
     }
   }
 
-  // Pause polling when tab hidden; resume + refresh when visible.
+  // Pause all polling/animation when the tab is hidden; resume when visible.
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       stopArrivalsPolling();
-    } else if (activeStop && !els.panel.classList.contains("hidden")) {
-      refreshArrivals();
-      startArrivalsPolling();
+      stopVehicleTracking();
+    } else {
+      if (activeStop && !els.panel.classList.contains("hidden")) {
+        refreshArrivals();
+        startArrivalsPolling();
+      }
+      // Resume live buses if a route is currently displayed.
+      if (current.lineId && current.data[current.direction]) startVehicleTracking();
     }
   });
+
+  // ---------- Live bus positions ----------
+  // TfL doesn't expose raw bus GPS, but Line/{id}/Arrivals gives every
+  // vehicle's countdown to each upcoming stop. We place each bus on the
+  // segment before the stop it's approaching and glide it as the countdown
+  // ticks down — a faithful approximation of where the bus actually is.
+  const BUS_TICK_MS = 250;
+
+  function busDivIcon() {
+    return L.divIcon({
+      className: "bus-marker",
+      html: '<div class="bus-icon">🚌</div>',
+      iconSize: [24, 24],
+      iconAnchor: [12, 12],
+    });
+  }
+
+  function positionBus(v) {
+    const f = Math.max(0, Math.min(1, 1 - v.tts / v.segSecs));
+    const lat = v.prev.lat + (v.next.lat - v.prev.lat) * f;
+    const lon = v.prev.lon + (v.next.lon - v.prev.lon) * f;
+    v.marker.setLatLng([lat, lon]);
+  }
+
+  async function refreshVehicles() {
+    const route = current.data[current.direction];
+    if (!route || !route.stops.length) return;
+
+    const idx = new Map();
+    route.stops.forEach((s, i) => idx.set(s.id, i));
+
+    let preds;
+    try {
+      preds = await getJSON(`${API}/Line/${encodeURIComponent(current.lineId)}/Arrivals`);
+    } catch {
+      return; // keep last-known positions on a transient error
+    }
+    // Only this direction, and only stops that are on the drawn route.
+    preds = preds.filter((p) => p.direction === current.direction && idx.has(p.naptanId));
+
+    const byVehicle = new Map();
+    preds.forEach((p) => {
+      if (!byVehicle.has(p.vehicleId)) byVehicle.set(p.vehicleId, []);
+      byVehicle.get(p.vehicleId).push(p);
+    });
+
+    const seen = new Set();
+    byVehicle.forEach((list, vehId) => {
+      list.sort((a, b) => a.timeToStation - b.timeToStation);
+      const nextP = list[0];
+      const nextIdx = idx.get(nextP.naptanId);
+      if (nextIdx == null) return;
+
+      const prev = route.stops[Math.max(0, nextIdx - 1)];
+      const next = route.stops[nextIdx];
+
+      // Estimate this segment's travel time from the gap between the bus's
+      // next two stops; fall back to a sensible default.
+      let segSecs = DEFAULT_SEGMENT_SECS;
+      if (list[1]) {
+        const d = list[1].timeToStation - nextP.timeToStation;
+        if (d > 5 && d < 600) segSecs = d;
+      }
+
+      seen.add(vehId);
+      let v = vehicles.get(vehId);
+      if (!v) {
+        const marker = L.marker([prev.lat, prev.lon], {
+          icon: busDivIcon(),
+          zIndexOffset: 1000,
+        }).bindTooltip("", { direction: "top", offset: [0, -10] });
+        marker.addTo(busLayer);
+        v = { marker };
+        vehicles.set(vehId, v);
+      }
+      v.prev = prev;
+      v.next = next;
+      v.tts = nextP.timeToStation;
+      v.segSecs = segSecs;
+      v.dest = nextP.destinationName || nextP.towards || "";
+      v.marker.setTooltipContent(
+        `Route ${current.lineId.toUpperCase()} → ${escapeHtml(v.dest)}<br>Next stop: ${escapeHtml(next.name)}`
+      );
+      positionBus(v);
+    });
+
+    // Drop vehicles that have left the line.
+    vehicles.forEach((v, id) => {
+      if (!seen.has(id)) {
+        busLayer.removeLayer(v.marker);
+        vehicles.delete(id);
+      }
+    });
+  }
+
+  function tickVehicles() {
+    if (document.hidden) return;
+    vehicles.forEach((v) => {
+      if (v.tts > 0) {
+        v.tts = Math.max(0, v.tts - BUS_TICK_MS / 1000);
+        positionBus(v);
+      }
+    });
+  }
+
+  function startVehicleTracking() {
+    stopVehicleTracking();
+    if (document.hidden) return;
+    refreshVehicles();
+    vehiclePollTimer = setInterval(refreshVehicles, VEHICLE_POLL_INTERVAL);
+    busTickTimer = setInterval(tickVehicles, BUS_TICK_MS);
+  }
+
+  function stopVehicleTracking() {
+    if (vehiclePollTimer) clearInterval(vehiclePollTimer);
+    if (busTickTimer) clearInterval(busTickTimer);
+    vehiclePollTimer = busTickTimer = null;
+    vehicles.clear();
+    if (busLayer) busLayer.clearLayers();
+  }
+
+  // ---------- Stops near me (geolocation) ----------
+  function findNearMe() {
+    if (!navigator.geolocation) {
+      setStatus("Geolocation isn't supported by this browser.", "error");
+      return;
+    }
+    setStatus("Locating you…", "loading");
+    els.nearmeBtn.disabled = true;
+    navigator.geolocation.getCurrentPosition(onPosition, onGeoError, {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 60000,
+    });
+  }
+
+  function onGeoError(err) {
+    els.nearmeBtn.disabled = false;
+    setStatus(
+      err.code === err.PERMISSION_DENIED
+        ? "Location permission denied — allow it to find nearby stops."
+        : "Couldn't get your location. Try again.",
+      "error"
+    );
+  }
+
+  async function onPosition(pos) {
+    const lat = pos.coords.latitude;
+    const lon = pos.coords.longitude;
+    try {
+      const url =
+        `${API}/StopPoint?stopTypes=NaptanPublicBusCoachTram&modes=bus` +
+        `&radius=500&useStopPointHierarchy=false&lat=${lat}&lon=${lon}`;
+      const data = await getJSON(url);
+      let stops = (data.stopPoints || []).map((s) => ({
+        id: s.naptanId || s.id,
+        name: s.commonName,
+        lat: s.lat,
+        lon: s.lon,
+        stopLetter: s.stopLetter,
+        lines: (s.lines || []).map((l) => l.name),
+        dist: haversine(lat, lon, s.lat, s.lon),
+      }));
+      stops.sort((a, b) => a.dist - b.dist);
+      stops = stops.slice(0, 12);
+      if (!stops.length) {
+        setStatus("No bus stops found within 500 m of you.", "error");
+        return;
+      }
+      showNearby(lat, lon, stops);
+      setStatus("", "");
+    } catch (e) {
+      setStatus("Couldn't load nearby stops (" + (e.status || "network") + ").", "error");
+    } finally {
+      els.nearmeBtn.disabled = false;
+    }
+  }
+
+  function showNearby(lat, lon, stops) {
+    // Entering near-me mode — clear any route view and live buses.
+    stopVehicleTracking();
+    routeLayer.clearLayers();
+    markerLayer.clearLayers();
+    meLayer.clearLayers();
+    els.routeMeta.classList.add("hidden");
+    current.lineId = null;
+    closePanel();
+
+    els.nearbyMeta.classList.remove("hidden");
+    els.nearbyTitle.textContent = stops.length + " stops near you";
+
+    L.marker([lat, lon], {
+      icon: L.divIcon({ className: "", html: '<div class="me-marker"></div>', iconSize: [16, 16], iconAnchor: [8, 8] }),
+      zIndexOffset: 500,
+    })
+      .addTo(meLayer)
+      .bindTooltip("You are here");
+
+    const pts = [[lat, lon]];
+    els.nearbyList.innerHTML = "";
+    stops.forEach((s) => {
+      pts.push([s.lat, s.lon]);
+      L.marker([s.lat, s.lon], {
+        icon: L.divIcon({ className: "", html: '<div class="nearby-marker"></div>', iconSize: [12, 12], iconAnchor: [6, 6] }),
+      })
+        .addTo(meLayer)
+        .bindTooltip(s.name)
+        .on("click", () => selectStop(s, true));
+
+      const lines = s.lines.slice(0, 10).join(", ");
+      const li = document.createElement("li");
+      li.innerHTML =
+        `<div class="nb-name">${escapeHtml(s.name)}` +
+        (s.stopLetter ? ` <span class="nb-sub">(Stop ${escapeHtml(s.stopLetter)})</span>` : "") +
+        `</div><div class="nb-sub">${Math.round(s.dist)} m away${lines ? " · " + escapeHtml(lines) : ""}</div>`;
+      li.addEventListener("click", () => {
+        selectStop(s, true);
+        map.panTo([s.lat, s.lon]);
+      });
+      els.nearbyList.appendChild(li);
+    });
+
+    map.fitBounds(L.latLngBounds(pts).pad(0.25));
+    document.getElementById("map").scrollIntoView({ behavior: "smooth", block: "nearest" });
+    setTimeout(() => map.invalidateSize(), 350);
+  }
+
+  function haversine(lat1, lon1, lat2, lon2) {
+    const R = 6371000;
+    const toRad = (d) => (d * Math.PI) / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(a));
+  }
 
   // ---------- Search flow ----------
   async function handleSearch(rawValue) {
@@ -334,8 +595,13 @@
         : "");
     renderStopList(route);
     drawRoute(route);
+    // Leaving near-me mode if it was active.
+    els.nearbyMeta.classList.add("hidden");
+    meLayer.clearLayers();
     // New route — close any open arrivals panel from a previous route.
     closePanel();
+    // Start (or restart) the live bus overlay for this route + direction.
+    startVehicleTracking();
     // Bring the map into view (matters on mobile, where it sits below the
     // sidebar). Once the scroll/layout settles, recompute the map size and
     // re-fit the route so the zoom is correct for the final container size.
@@ -396,6 +662,7 @@
     });
   });
   els.apClose.addEventListener("click", closePanel);
+  els.nearmeBtn.addEventListener("click", findNearMe);
 
   initMap();
 })();

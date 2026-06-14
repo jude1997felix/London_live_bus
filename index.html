@@ -33,8 +33,14 @@
           />
           <button type="submit" id="search-btn">Go</button>
         </div>
+        <button type="button" id="nearme-btn">📍 Find stops near me</button>
         <div id="status" class="status" role="status" aria-live="polite"></div>
       </form>
+
+      <div id="nearby-meta" class="hidden">
+        <h2 id="nearby-title">Nearest stops</h2>
+        <ul id="nearby-list" aria-label="Nearby stops"></ul>
+      </div>
 
       <div id="route-meta" class="hidden">
         <div class="direction-toggle">
