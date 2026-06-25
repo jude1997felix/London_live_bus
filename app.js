@@ -40,10 +40,27 @@
     bpBody: document.getElementById("bp-body"),
     bpClose: document.getElementById("bp-close"),
     bpNote: document.getElementById("bp-note"),
+    // Mode switch + journey planner
+    modeTrack: document.getElementById("mode-track"),
+    modePlan: document.getElementById("mode-plan"),
+    trackMode: document.getElementById("track-mode"),
+    planMode: document.getElementById("plan-mode"),
+    planForm: document.getElementById("plan-form"),
+    fromInput: document.getElementById("from-input"),
+    toInput: document.getElementById("to-input"),
+    planBtn: document.getElementById("plan-btn"),
+    planStatus: document.getElementById("plan-status"),
+    locBtns: Array.from(document.querySelectorAll(".loc-btn")),
+    journeyResults: document.getElementById("journey-results"),
+    journeyList: document.getElementById("journey-list"),
+    journeyTitle: document.getElementById("journey-title"),
   };
 
   // ---- State ----
-  let map, routeLayer, markerLayer, busLayer, meLayer;
+  let map, routeLayer, markerLayer, busLayer, meLayer, journeyLayer;
+  let journeys = []; // last planned journey options
+  let selectedJourneyIdx = -1;
+  let journeyEndpoints = { from: "", to: "" }; // resolved start/end labels
   let current = {
     lineId: null,
     direction: "outbound",
@@ -85,6 +102,7 @@
     markerLayer = L.layerGroup().addTo(map);
     busLayer = L.layerGroup().addTo(map);
     meLayer = L.layerGroup().addTo(map);
+    journeyLayer = L.layerGroup().addTo(map);
     // Whenever the map container changes size (mobile layout shifts, the
     // sidebar growing, scroll settling), recompute Leaflet's size so tiles
     // fill the whole viewport instead of leaving blank gaps.
@@ -645,6 +663,291 @@
     return 2 * R * Math.asin(Math.sqrt(a));
   }
 
+  // ---------- Mode switch (Track / Plan) ----------
+  function setMode(mode) {
+    const plan = mode === "plan";
+    els.modePlan.classList.toggle("active", plan);
+    els.modeTrack.classList.toggle("active", !plan);
+    els.planMode.classList.toggle("hidden", !plan);
+    els.trackMode.classList.toggle("hidden", plan);
+
+    if (plan) {
+      // Hide the live-tracking overlays and any drawn route while planning,
+      // so the map is clean for the journey.
+      stopVehicleTracking();
+      closePanel();
+      routeLayer.clearLayers();
+      markerLayer.clearLayers();
+      meLayer.clearLayers();
+      els.routeMeta.classList.add("hidden");
+      els.nearbyMeta.classList.add("hidden");
+    } else {
+      // Leaving plan mode — clear journey drawing.
+      clearJourney();
+    }
+    setTimeout(() => map.invalidateSize(), 200);
+  }
+
+  function clearJourney() {
+    journeyLayer.clearLayers();
+    journeys = [];
+    selectedJourneyIdx = -1;
+    els.journeyResults.classList.add("hidden");
+  }
+
+  // ---------- Journey planning ----------
+  // Colours per transport mode for drawing legs + chips.
+  const MODE_STYLE = {
+    walking: { color: "#9aa4b2", label: "Walk", dash: "2 8" },
+    bus: { color: "#e01e2b", label: "Bus" },
+    tube: { color: "#2563eb", label: "Tube" },
+    "national-rail": { color: "#16a34a", label: "Rail" },
+    overground: { color: "#ee7c0e", label: "Overground" },
+    "elizabeth-line": { color: "#6950a1", label: "Elizabeth" },
+    dlr: { color: "#00a4a7", label: "DLR" },
+    tram: { color: "#5fb526", label: "Tram" },
+    "river-bus": { color: "#0099cc", label: "River" },
+    default: { color: "#6b7280", label: "Transit" },
+  };
+  function modeStyle(m) {
+    return MODE_STYLE[m] || MODE_STYLE.default;
+  }
+
+  function setPlanStatus(msg, cls) {
+    els.planStatus.textContent = msg;
+    els.planStatus.className = "status" + (cls ? " " + cls : "");
+  }
+
+  // Resolve a free-text place to "lat,lon". Returns the raw value for
+  // coordinates/postcodes (TfL handles them directly) and only disambiguates
+  // place names when needed.
+  function looksLikeLatLon(v) {
+    return /^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/.test(v.trim());
+  }
+
+  // Fill a From/To field with the user's current coordinates.
+  function useMyLocationFor(target) {
+    const input = target === "to" ? els.toInput : els.fromInput;
+    if (!navigator.geolocation) {
+      setPlanStatus("Geolocation isn't supported by this browser.", "error");
+      return;
+    }
+    setPlanStatus("Locating you…", "loading");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        input.value = pos.coords.latitude.toFixed(5) + "," + pos.coords.longitude.toFixed(5);
+        setPlanStatus("", "");
+      },
+      (err) =>
+        setPlanStatus(
+          err.code === err.PERMISSION_DENIED
+            ? "Location permission denied."
+            : "Couldn't get your location.",
+          "error"
+        ),
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    );
+  }
+
+  async function planJourney() {
+    const from = els.fromInput.value.trim();
+    const to = els.toInput.value.trim();
+    if (!from || !to) {
+      setPlanStatus("Enter both a start and a destination.", "error");
+      return;
+    }
+    setPlanStatus("Planning your journey…", "loading");
+    els.planBtn.disabled = true;
+    // Default labels (used when the input was already precise, e.g. coords).
+    journeyEndpoints = { from: from, to: to };
+    try {
+      let result = await fetchJourney(from, to);
+
+      // Place names come back as HTTP 300 with disambiguation options —
+      // pick the best transit match for each side and retry with coordinates.
+      if (result.disambiguation) {
+        const f = pickDisambig(result.data, "fromLocationDisambiguation", from);
+        const t = pickDisambig(result.data, "toLocationDisambiguation", to);
+        if (!f || !t) {
+          setPlanStatus("Couldn't find that place. Try a postcode or station name.", "error");
+          return;
+        }
+        journeyEndpoints = { from: f.name, to: t.name };
+        result = await fetchJourney(f.latLon, t.latLon);
+        if (result.disambiguation) {
+          setPlanStatus("Couldn't pin down those locations. Try more specific names.", "error");
+          return;
+        }
+      }
+
+      journeys = (result.data.journeys || []).slice(0, 4);
+      if (!journeys.length) {
+        setPlanStatus("No journeys found between those points.", "error");
+        return;
+      }
+      setPlanStatus("", "");
+      renderJourneyList();
+      selectJourney(0); // show the first (recommended) option
+    } catch (e) {
+      setPlanStatus("Couldn't plan that journey (" + (e.status || "network") + ").", "error");
+    } finally {
+      els.planBtn.disabled = false;
+    }
+  }
+
+  // Returns { disambiguation: bool, data }. A 300 isn't an error here.
+  // Restricted to bus (+ walking) for now; other modes come later.
+  async function fetchJourney(from, to) {
+    const url =
+      `${API}/Journey/JourneyResults/${encodeURIComponent(from)}/to/${encodeURIComponent(to)}?mode=bus`;
+    const res = await fetch(withKey(url));
+    if (res.status === 300) return { disambiguation: true, data: await res.json() };
+    if (!res.ok) throw Object.assign(new Error("HTTP " + res.status), { status: res.status });
+    return { disambiguation: false, data: await res.json() };
+  }
+
+  function pickDisambig(data, key, fallbackLabel) {
+    const opts = (data[key] && data[key].disambiguationOptions) || [];
+    if (!opts.length) {
+      // Already a precise match for this side (only the other was ambiguous).
+      return { latLon: fallbackLabel, name: fallbackLabel };
+    }
+    // Prefer actual transit stops/stations over arbitrary POIs (TfL's top
+    // match for "Victoria" is a pub in Haringey; we want London Victoria).
+    const stops = opts.filter((o) => o.place && o.place.placeType === "StopPoint");
+    const pool = stops.length ? stops : opts;
+    pool.sort((a, b) => (b.matchQuality || 0) - (a.matchQuality || 0));
+    const place = pool[0].place;
+    return { latLon: `${place.lat},${place.lon}`, name: place.commonName };
+  }
+
+  function renderJourneyList() {
+    els.journeyResults.classList.remove("hidden");
+    els.journeyTitle.textContent =
+      `${journeyEndpoints.from} → ${journeyEndpoints.to}`;
+    els.journeyList.innerHTML = "";
+    journeys.forEach((j, i) => {
+      const li = document.createElement("li");
+      li.className = "journey";
+      li.dataset.idx = i;
+      li.innerHTML = journeyCardHtml(j);
+      li.addEventListener("click", () => selectJourney(i));
+      els.journeyList.appendChild(li);
+    });
+  }
+
+  function journeyCardHtml(j, expanded) {
+    const chips = j.legs
+      .map((leg) => {
+        const st = modeStyle(leg.mode.name);
+        const line =
+          leg.mode.name !== "walking" && leg.routeOptions && leg.routeOptions[0] && leg.routeOptions[0].name
+            ? leg.routeOptions[0].name
+            : st.label;
+        return `<span class="leg-chip" style="background:${st.color}">${escapeHtml(line)}</span>`;
+      })
+      .join('<span class="leg-sep">›</span>');
+
+    let html =
+      `<div class="journey-head">` +
+      `<span class="journey-dur">${j.duration} min</span>` +
+      `<span class="journey-times">${fmtTime(j.startDateTime)} → ${fmtTime(j.arrivalDateTime)}</span>` +
+      `</div><div class="journey-legs">${chips}</div>`;
+
+    if (expanded) {
+      html +=
+        '<ul class="journey-steps">' +
+        j.legs
+          .map((leg) => {
+            const st = modeStyle(leg.mode.name);
+            return (
+              `<li><span class="step-mins" style="color:${st.color}">${leg.duration} min</span>` +
+              `<span class="step-text">${escapeHtml(leg.instruction.summary)}</span></li>`
+            );
+          })
+          .join("") +
+        "</ul>";
+    }
+    return html;
+  }
+
+  function selectJourney(idx) {
+    selectedJourneyIdx = idx;
+    // Re-render cards so only the selected one is expanded + highlighted.
+    Array.from(els.journeyList.children).forEach((li, i) => {
+      li.classList.toggle("active", i === idx);
+      li.innerHTML = journeyCardHtml(journeys[i], i === idx);
+    });
+    drawJourney(journeys[idx]);
+  }
+
+  function drawJourney(j) {
+    journeyLayer.clearLayers();
+    const all = [];
+
+    j.legs.forEach((leg) => {
+      const st = modeStyle(leg.mode.name);
+      const coords = parseLegPath(leg);
+      coords.forEach((c) => all.push(c));
+      if (coords.length > 1) {
+        L.polyline(coords, {
+          color: st.color,
+          weight: leg.mode.name === "walking" ? 3 : 5,
+          opacity: 0.9,
+          dashArray: st.dash || null,
+        }).addTo(journeyLayer);
+      }
+    });
+
+    // Start (green) and end (red) markers for the whole trip.
+    if (all.length) {
+      addEndpoint(all[0], "#16a34a", "Start");
+      addEndpoint(all[all.length - 1], "#e01e2b", "Destination");
+      map.fitBounds(L.latLngBounds(all), { padding: [40, 40] });
+    }
+    document.getElementById("map").scrollIntoView({ behavior: "smooth", block: "nearest" });
+    setTimeout(() => map.invalidateSize(), 250);
+  }
+
+  function addEndpoint(latlng, color, label) {
+    L.marker(latlng, {
+      icon: L.divIcon({
+        className: "",
+        html: `<div class="me-marker" style="background:${color}"></div>`,
+        iconSize: [16, 16],
+        iconAnchor: [8, 8],
+      }),
+      zIndexOffset: 600,
+    })
+      .addTo(journeyLayer)
+      .bindTooltip(label);
+  }
+
+  // Leg geometry is a JSON string of coordinate pairs; order varies, so detect
+  // which element is the latitude (London lat ~51, lon ~0).
+  function parseLegPath(leg) {
+    const raw = leg.path && leg.path.lineString;
+    if (!raw) return [];
+    let arr;
+    try {
+      arr = JSON.parse(raw);
+    } catch {
+      return [];
+    }
+    const out = [];
+    arr.forEach((pair) => {
+      if (!Array.isArray(pair) || pair.length < 2) return;
+      const [a, b] = pair;
+      out.push(Math.abs(a) > Math.abs(b) ? [a, b] : [b, a]);
+    });
+    return out;
+  }
+
+  function fmtTime(iso) {
+    const d = new Date(iso);
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+
   // ---------- Search flow ----------
   async function handleSearch(rawValue) {
     const lineId = rawValue.trim().toLowerCase();
@@ -757,6 +1060,17 @@
   els.apClose.addEventListener("click", closePanel);
   els.bpClose.addEventListener("click", closeBusPanel);
   els.nearmeBtn.addEventListener("click", findNearMe);
+
+  // Mode switch (Track route / Plan journey)
+  els.modeTrack.addEventListener("click", () => setMode("track"));
+  els.modePlan.addEventListener("click", () => setMode("plan"));
+  els.planForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    planJourney();
+  });
+  els.locBtns.forEach((btn) =>
+    btn.addEventListener("click", () => useMyLocationFor(btn.dataset.target))
+  );
 
   initMap();
 })();

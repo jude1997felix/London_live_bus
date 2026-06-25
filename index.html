@@ -21,34 +21,65 @@
         <p class="tagline">Real-time bus routes &amp; arrivals</p>
       </header>
 
-      <form id="search-form" autocomplete="off">
-        <label for="route-input">Bus route</label>
-        <div class="search-row">
-          <input
-            id="route-input"
-            type="text"
-            inputmode="numeric"
-            placeholder="e.g. 38, 73, N29"
-            aria-label="Bus route number"
-          />
-          <button type="submit" id="search-btn">Go</button>
-        </div>
-        <button type="button" id="nearme-btn">📍 Find stops near me</button>
-        <div id="status" class="status" role="status" aria-live="polite"></div>
-      </form>
-
-      <div id="nearby-meta" class="hidden">
-        <h2 id="nearby-title">Nearest stops</h2>
-        <ul id="nearby-list" aria-label="Nearby stops"></ul>
+      <div class="mode-switch" role="tablist">
+        <button id="mode-track" class="mode-btn active" role="tab">🚌 Track route</button>
+        <button id="mode-plan" class="mode-btn" role="tab">🧭 Plan journey</button>
       </div>
 
-      <div id="route-meta" class="hidden">
-        <div class="direction-toggle">
-          <button data-dir="outbound" class="dir-btn active">Outbound</button>
-          <button data-dir="inbound" class="dir-btn">Inbound</button>
+      <!-- ===== Track-a-route mode ===== -->
+      <div id="track-mode">
+        <form id="search-form" autocomplete="off">
+          <label for="route-input">Bus route</label>
+          <div class="search-row">
+            <input
+              id="route-input"
+              type="text"
+              inputmode="numeric"
+              placeholder="e.g. 38, 73, N29"
+              aria-label="Bus route number"
+            />
+            <button type="submit" id="search-btn">Go</button>
+          </div>
+          <button type="button" id="nearme-btn">📍 Find stops near me</button>
+          <div id="status" class="status" role="status" aria-live="polite"></div>
+        </form>
+
+        <div id="nearby-meta" class="hidden">
+          <h2 id="nearby-title">Nearest stops</h2>
+          <ul id="nearby-list" aria-label="Nearby stops"></ul>
         </div>
-        <h2 id="route-title"></h2>
-        <ul id="stop-list" aria-label="Stops on route"></ul>
+
+        <div id="route-meta" class="hidden">
+          <div class="direction-toggle">
+            <button data-dir="outbound" class="dir-btn active">Outbound</button>
+            <button data-dir="inbound" class="dir-btn">Inbound</button>
+          </div>
+          <h2 id="route-title"></h2>
+          <ul id="stop-list" aria-label="Stops on route"></ul>
+        </div>
+      </div>
+
+      <!-- ===== Plan-a-journey mode ===== -->
+      <div id="plan-mode" class="hidden">
+        <form id="plan-form" autocomplete="off">
+          <label for="from-input">From</label>
+          <div class="search-row">
+            <input id="from-input" type="text" placeholder="Place, postcode or station" aria-label="Journey start" />
+            <button type="button" class="loc-btn" data-target="from" title="Use my location">📍</button>
+          </div>
+          <label for="to-input">To</label>
+          <div class="search-row">
+            <input id="to-input" type="text" placeholder="Place, postcode or station" aria-label="Journey destination" />
+            <button type="button" class="loc-btn" data-target="to" title="Use my location">📍</button>
+          </div>
+          <button type="submit" id="plan-btn">Plan journey</button>
+          <div id="plan-status" class="status" role="status" aria-live="polite"></div>
+        </form>
+
+        <div id="journey-results" class="hidden">
+          <h2 id="journey-title">Journey options</h2>
+          <ul id="journey-list" aria-label="Journey options"></ul>
+        </div>
       </div>
     </aside>
 
@@ -86,6 +117,6 @@
        (it's git-ignored, so the public GitHub Pages build has no key). -->
   <script>window.TFL_CONFIG = { appKey: "" };</script>
   <script src="config.js" onerror="/* no local key — run keyless */"></script>
-  <script src="app.js"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>

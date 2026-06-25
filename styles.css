@@ -69,7 +69,10 @@ h1 {
 #search-form {
   padding: 16px 18px;
   border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
 }
+/* Inner lists fill remaining height and scroll within their mode container. */
+#route-meta, #nearby-meta { flex: 1 1 auto; min-height: 0; }
 
 label {
   display: block;
@@ -82,9 +85,9 @@ label {
 
 .search-row { display: flex; gap: 8px; }
 
-#route-input {
+#route-input, #from-input, #to-input {
   flex: 1;
-  min-width: 0; /* allow the input to shrink so the Go button always fits */
+  min-width: 0; /* allow the input to shrink so its button always fits */
   background: var(--panel-2);
   border: 1px solid var(--line);
   color: var(--text);
@@ -93,7 +96,7 @@ label {
   font-size: 16px;
   outline: none;
 }
-#route-input:focus { border-color: var(--accent-2); }
+#route-input:focus, #from-input:focus, #to-input:focus { border-color: var(--accent-2); }
 
 #search-btn {
   background: var(--accent);
@@ -146,6 +149,108 @@ label {
 .status:empty { display: none; } /* reclaim space when there's no message */
 
 #route-meta { padding: 14px 18px; overflow-y: auto; }
+
+/* ---------- Mode switch (Track / Plan) ---------- */
+.mode-switch {
+  display: flex;
+  gap: 6px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--line);
+}
+.mode-btn {
+  flex: 1;
+  background: var(--panel-2);
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.mode-btn:hover { border-color: var(--accent-2); }
+.mode-btn.active { background: var(--accent-2); color: #fff; border-color: var(--accent-2); }
+
+/* Each mode fills the remaining sidebar height; inner lists scroll. */
+#track-mode, #plan-mode {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ---------- Plan-a-journey ---------- */
+#plan-form { padding: 16px 18px; border-bottom: 1px solid var(--line); flex: 0 0 auto; }
+#plan-form label { margin-top: 10px; }
+#plan-form label:first-child { margin-top: 0; }
+.loc-btn {
+  flex: 0 0 auto;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 0 12px;
+  font-size: 16px;
+  cursor: pointer;
+}
+.loc-btn:hover { border-color: var(--accent-2); }
+#plan-btn {
+  margin-top: 12px;
+  width: 100%;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 11px;
+  font-weight: 700;
+  font-size: 15px;
+  cursor: pointer;
+}
+#plan-btn:hover { filter: brightness(1.08); }
+#plan-btn:disabled { opacity: 0.5; cursor: default; }
+
+#journey-results { padding: 12px 14px; overflow-y: auto; flex: 1 1 auto; min-height: 0; }
+#journey-title { font-size: 15px; margin: 0 0 10px; padding: 0 4px; }
+#journey-list { list-style: none; margin: 0; padding: 0; }
+.journey {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  background: var(--panel-2);
+}
+.journey:hover { border-color: var(--accent-2); }
+.journey.active { border-color: var(--accent-2); box-shadow: 0 0 0 1px var(--accent-2); }
+.journey-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+.journey-dur { font-size: 16px; font-weight: 700; color: var(--text); }
+.journey-times { font-size: 12px; color: var(--muted); }
+.journey-legs { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.leg-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  padding: 2px 7px;
+  border-radius: 5px;
+  white-space: nowrap;
+}
+.leg-sep { color: var(--muted); font-size: 11px; }
+
+/* Expanded step-by-step instructions for the selected journey. */
+.journey-steps { list-style: none; margin: 10px 0 0; padding: 0; }
+.journey-steps li {
+  display: flex;
+  gap: 8px;
+  padding: 7px 0;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+.step-mins { color: var(--muted); white-space: nowrap; min-width: 46px; }
+.step-text { flex: 1; color: var(--text); }
 
 .direction-toggle {
   display: flex;
